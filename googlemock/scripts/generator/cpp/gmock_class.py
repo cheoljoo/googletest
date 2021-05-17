@@ -112,14 +112,34 @@ def _EscapeForMacro(s):
 
 def _GenerateMethods(output_lines, source, class_node):
   function_type = (
-      ast.FUNCTION_VIRTUAL | ast.FUNCTION_PURE_VIRTUAL | ast.FUNCTION_OVERRIDE)
+      ast.FUNCTION_VIRTUAL | ast.FUNCTION_PURE_VIRTUAL | ast.FUNCTION_OVERRIDE | ast.FUNCTION_NONE | ast.FUNCTION_UNKNOWN_ANNOTATION)
   ctor_or_dtor = ast.FUNCTION_CTOR | ast.FUNCTION_DTOR
   indent = ' ' * _INDENT
 
   for node in class_node.body:
-    # We only care about virtual functions.
-    if (isinstance(node, ast.Function) and node.modifiers & function_type and
-        not node.modifiers & ctor_or_dtor):
+    if (isinstance(node, ast.Class) and node.body ):
+      class_name = node.name
+      parent_name = class_name
+      class_node = node
+      # Add the class prolog.
+      output_lines.append('class Mock%s : public %s {'  # }
+                   % (class_name, parent_name))
+      output_lines.append('%spublic:' % (' ' * (_INDENT // 2)))
+
+      # Add all the methods.
+      _GenerateMethods(output_lines, source, class_node)
+
+      # Close the class.
+      if output_lines:
+        # If there are no virtual methods, no need for a public label.
+        if len(output_lines) == 2:
+          del output_lines[-1]
+
+        # Only close the class if there really is a class.
+        output_lines.append('};')
+        output_lines.append('')  # Add an extra newline.
+
+    if isinstance(node, ast.Function) :
       # Pick out all the elements we need from the original function.
       modifiers = 'override'
       if node.modifiers & ast.FUNCTION_CONST:
@@ -159,12 +179,13 @@ def _GenerateMocks(filename, source, ast_list, desired_class_names):
 
       # Add template args for templated classes.
       if class_node.templated_types:
-        # TODO(paulchang): The AST doesn't preserve template argument order,
-        # so we have to make up names here.
         # TODO(paulchang): Handle non-type template arguments (e.g.
         # template<typename T, int N>).
-        template_arg_count = len(class_node.templated_types.keys())
-        template_args = ['T%d' % n for n in range(template_arg_count)]
+
+        # class_node.templated_types is an OrderedDict from strings to a tuples.
+        # The key is the name of the template, and the value is
+        # (type_name, default). Both type_name and default could be None.
+        template_args = class_node.templated_types.keys()
         template_decls = ['typename ' + arg for arg in template_args]
         lines.append('template <' + ', '.join(template_decls) + '>')
         parent_name += '<' + ', '.join(template_args) + '>'
